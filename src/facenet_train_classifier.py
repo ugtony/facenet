@@ -79,6 +79,7 @@ def main(args):
         lfw_paths, actual_issame = lfw.get_paths(os.path.expanduser(args.lfw_dir), pairs, args.lfw_file_ext)
     
     with tf.Graph().as_default():
+      with tf.device(args.device):
         tf.set_random_seed(args.seed)
         global_step = tf.Variable(0, trainable=False)
         
@@ -178,7 +179,7 @@ def main(args):
             gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory_fraction)
         else:
             gpu_options = tf.GPUOptions(allow_growth = True)
-        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False))        
+        sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False, allow_soft_placement = True))        
         sess.run(tf.global_variables_initializer())
         sess.run(tf.local_variables_initializer())
         summary_writer = tf.summary.FileWriter(log_dir, sess.graph)
@@ -357,6 +358,8 @@ def parse_arguments(argv):
         help='Directory where to write event logs.', default='~/logs/facenet')
     parser.add_argument('--models_base_dir', type=str,
         help='Directory where to write trained models and checkpoints.', default='~/models/facenet')
+    parser.add_argument('--device', type=str,
+        help='Device for Graph Trainingm, e.g., "/gpu:2", "/cpu:0".', default="/cpu:0")
     parser.add_argument('--gpu_memory_fraction', type=float,
         help='Upper bound on the amount of GPU memory that will be used by the process.', default=1.0)
     parser.add_argument('--pretrained_model', type=str,

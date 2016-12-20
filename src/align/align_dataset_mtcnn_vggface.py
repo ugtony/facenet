@@ -52,7 +52,7 @@ def main(args):
         sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False))
         #sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=True))
         with sess.as_default():
-	    if args.device:
+            if args.device:
                 with tf.device(args.device):
                     pnet, rnet, onet = align.detect_face.create_mtcnn(sess, '../../data/')
             else:
