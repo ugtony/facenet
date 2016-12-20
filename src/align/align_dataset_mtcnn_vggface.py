@@ -100,6 +100,11 @@ def main(args):
                             text_file.write('%s\n' % (output_filename))
                             continue
                         img = img[:,:,0:3]
+                        #check image size, don't be too big
+                        resize_ratio = 1.0
+                        if max(img.shape[0:2]) > args.maximum_image_size:
+                            resize_ratio = args.maximum_image_size / max(img.shape[0:2])
+                            img = misc.imresize(img, resize_ratio)
     
                         bounding_boxes, _ = align.detect_face.detect_face(img, minsize, pnet, rnet, onet, threshold, factor)
                         nrof_faces = bounding_boxes.shape[0]
@@ -109,6 +114,7 @@ def main(args):
                             
                             meta = readMeta(args.meta_dir, cls.name, image_path[image_path.rfind('/')+1:image_path.rfind('.')])
                             bbox = meta['bbox']
+                            bbox = bbox * resize_ratio
                             
                             #todo: choose the bbox with maximum overlap(intersection/union) ratio
                             if nrof_faces>1:
@@ -204,6 +210,8 @@ def parse_arguments(argv):
         help='Upper bound on the amount of GPU memory that will be used by the process.', default=1.0)
     parser.add_argument('--overlap_threshold', type=float,
         help='Lowest overlap threshold, if the overlaped area among detected face and the VGGFace meta is lower than this, it will be identified as a failed detection.', default=0.3)
+    parser.add_argument('--maximum_image_size', type=int,
+        help='If the image is larger than this size, its maximum dimension will be shrinked to this first', default=2048)
     return parser.parse_args(argv)
 
 if __name__ == '__main__':
