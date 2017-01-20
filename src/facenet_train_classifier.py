@@ -93,9 +93,12 @@ def main(args):
         # Placeholder for the learning rate
         learning_rate_placeholder = tf.placeholder(tf.float32, name='learning_rate')
         
+        transformed, spt = facenet.add_spatial_transform_layer(image_batch, weight_decay=args.weight_decay)
         # Build the inference graph
-        prelogits, _ = network.inference(image_batch, args.keep_probability, 
+        prelogits, _ = network.inference(transformed, args.keep_probability, 
             phase_train=True, weight_decay=args.weight_decay)
+        #prelogits, _ = network.inference(image_batch, args.keep_probability, 
+        #    phase_train=True, weight_decay=args.weight_decay)
         logits = slim.fully_connected(prelogits, len(train_set), activation_fn=None, 
                 weights_initializer=tf.truncated_normal_initializer(stddev=0.1), 
                 weights_regularizer=slim.l2_regularizer(args.weight_decay),
@@ -152,7 +155,7 @@ def main(args):
         if args.gpu_memory_fraction < 1.0:
             gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=args.gpu_memory_fraction)
         else:
-            gpu_options = tf.GPUOptions(allow_growth = True)
+            gpu_options = tf.GPUOptions(allow_growth = True)        
         sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options, log_device_placement=False, allow_soft_placement = True))        
         sess.run(tf.global_variables_initializer())
         sess.run(tf.local_variables_initializer())
@@ -162,8 +165,9 @@ def main(args):
         with sess.as_default():
 
             if pretrained_model:
-                print('Restoring pretrained model: %s' % pretrained_model)
-                saver.restore(sess, pretrained_model)
+                optimistic_restore(sess, pretrained_model)
+                #print('Restoring pretrained model: %s' % pretrained_model)
+                #saver.restore(sess, pretrained_model)
 
             # Training and validation loop
             print('Running training')
@@ -173,7 +177,7 @@ def main(args):
                 epoch = step // args.epoch_size
                 # Train for one epoch
                 train(args, sess, epoch, learning_rate_placeholder, global_step, 
-                    total_loss, train_op, summary_op, summary_writer, regularization_losses, args.learning_rate_schedule_file)
+                    total_loss, train_op, summary_op, summary_writer, regularization_losses, args.learning_rate_schedule_file, spt)
 
                 # Save variables and the metagraph if it doesn't exist already
                 save_variables_and_metagraph(sess, saver, summary_writer, model_dir, subdir, step)
@@ -186,7 +190,7 @@ def main(args):
     return model_dir
   
 def train(args, sess, epoch, learning_rate_placeholder, global_step, 
-      loss, train_op, summary_op, summary_writer, regularization_losses, learning_rate_schedule_file):
+      loss, train_op, summary_op, summary_writer, regularization_losses, learning_rate_schedule_file, spt):
     batch_number = 0
     
     if args.learning_rate>0.0:
@@ -201,16 +205,20 @@ def train(args, sess, epoch, learning_rate_placeholder, global_step,
         while batch_number < args.epoch_size:
             start_time = time.time()
             feed_dict = {learning_rate_placeholder: lr}
-            err, _, step, reg_loss = sess.run([loss, train_op, global_step, regularization_losses], feed_dict=feed_dict)
+            err, _, step, reg_loss, transform = sess.run([loss, train_op, global_step, regularization_losses, spt], feed_dict=feed_dict)
             if (batch_number % 100 == 0):
                 summary_str, step = sess.run([summary_op, global_step], feed_dict=feed_dict)
                 summary_writer.add_summary(summary_str, global_step=step)
             duration = time.time() - start_time
             print('Epoch: [%d][%d/%d]\tTime %.3f\tLoss %2.3f\tRegLoss %2.3f' %
                   (epoch, batch_number+1, args.epoch_size, duration, err, np.sum(reg_loss)))
+            
             batch_number += 1
             i += 1
             train_time += duration
+
+        print(transform)
+        
         # Add validation loss and accuracy to summary
         summary = tf.Summary()
         #pylint: disable=maybe-no-member
@@ -270,7 +278,22 @@ def save_variables_and_metagraph(sess, saver, summary_writer, model_dir, model_n
     summary.value.add(tag='time/save_metagraph', simple_value=save_time_metagraph)
     summary_writer.add_summary(summary, step)
   
-
+def optimistic_restore(session, save_file):
+    reader = tf.train.NewCheckpointReader(save_file)
+    saved_shapes = reader.get_variable_to_shape_map()
+    var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.global_variables()
+            if var.name.split(':')[0] in saved_shapes])
+    #print(saved_shapes)
+    #print([var.name.split(':')[0] for var in tf.global_variables()])
+    restore_vars = []    
+    for var_name, saved_var_name in var_names:            
+        curr_var = tf.get_default_graph().get_tensor_by_name(var_name)
+        var_shape = curr_var.get_shape().as_list()
+        if var_shape == saved_shapes[saved_var_name]:
+            restore_vars.append(curr_var)
+    opt_saver = tf.train.Saver(restore_vars)
+    opt_saver.restore(session, save_file)
+  
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
     

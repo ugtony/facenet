@@ -38,6 +38,9 @@ from sklearn.cross_validation import KFold
 from scipy import interpolate
 from tensorflow.python.training import training
 
+import tensorflow.contrib.slim as slim
+from spatial_transformer import transformer
+
 #import h5py
 
 
@@ -145,6 +148,44 @@ def read_and_augument_data(image_list, label_list, image_size, batch_size, max_n
         allow_smaller_final_batch=True)
   
     return image_batch, label_batch
+
+def add_spatial_transform_layer(image_batch, weight_decay=0.0):
+    batch_norm_params = {
+        # Decay for the moving averages.
+        'decay': 0.995,
+        # epsilon to prevent 0s in variance.
+        'epsilon': 0.001,
+        # force in-place updates of mean and variance estimates
+        'updates_collections': None,
+    }
+    print(image_batch)
+    with tf.variable_scope('stn'):
+        with slim.arg_scope([slim.conv2d, slim.fully_connected],
+            weights_initializer=tf.truncated_normal_initializer(stddev=0.001),
+            weights_regularizer=slim.l2_regularizer(weight_decay),
+            normalizer_fn=slim.batch_norm,
+            normalizer_params=batch_norm_params):
+            with slim.arg_scope([slim.conv2d], stride=1, padding='SAME'):
+                net = slim.conv2d(image_batch, 32, [5, 5], scope='stn_conv1')
+                net = slim.max_pool2d(net, 2, scope='stn_pool1')
+                net = slim.conv2d(image_batch, 32, [5, 5], scope='stn_conv2')
+                net = slim.flatten(net)   
+                net = slim.fully_connected(net, 32, scope='stn_fc1')
+                net = slim.fully_connected(net, 32, scope='stn_fc2')
+                delta_theta = slim.fully_connected(net, 6, activation_fn=None, scope='stn_fc3')
+
+                initial = np.array([[1, 0, 0], [0, 1, 0]])
+                initial = initial.astype('float32')
+                initial = initial.flatten()
+
+                initial_theta = tf.Variable(initial_value=initial, name='stn_initial_theta')
+                h_fc1 = tf.add(delta_theta, initial_theta)
+                #h_fc1 = initial_theta
+                shape = image_batch.get_shape().as_list()
+                
+                h_trans = transformer(image_batch, h_fc1, (shape[1], shape[2]))
+                transformed = tf.reshape(h_trans, [-1, shape[1], shape[2], shape[3]])
+    return transformed, h_fc1
   
 def _add_loss_summaries(total_loss):
     """Add summaries for losses.
